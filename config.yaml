@@ -1,0 +1,91 @@
+gpu: [0]
+task_sequence: ["derain","denoise","deblurring",]
+dataset_path: "../Datasets"
+is_train: True
+visualize: True
+patch_size: 176
+# patch_size: 120
+
+model:
+  # net: 'piggyback'
+  replace: true
+  piggylamdas: 0.25
+
+train:
+  num_epochs: [200,200,200,150]
+  num_epoch_baseline: 1
+  # num_epoch_baseline: 20
+  batch_size: [8,8,8,8]
+
+  val_interval: 100
+  lr_init:   
+    - !!float 2e-4
+    - !!float 2e-4
+    - !!float 2e-4
+    - !!float 1e-4
+  lr_min:  
+    - !!float 1e-6
+    - !!float 1e-6
+    - !!float 1e-6
+    - !!float 5e-5
+
+
+
+  lr_policy: 'cosine'
+  ##
+  # ewclamda1: !!float 5e9
+  # ewclamda2: !!float 1e11
+  ##
+
+checkpoints:
+  save_image: True
+  save_image_interval: 10
+  save_image_dir: './results'
+  save_model_dir: './checkpoints'
+  resume: false
+  resume_mode: 'epoch'
+  resume_epoch: 160
+  resume_task_id: 2
+
+
+faig:
+  total_step: 200
+  rate: 0.0005
+
+cyclegan:
+  nodes: 1
+  gpu_ids: [0,1,2,3]
+  nr : 0 # ranking within nodes
+
+# model and arch
+  ngf : 64
+  ndf : 64
+  netD : "basic" # [basic | n_layers | pixel]
+  netG : "resnet_9blocks" # [resnet_9blocks | resnet_6blocks | unet_256 | unet_128]
+  norm : "instance" # [instance | batch | none]
+  init_type : "normal" # [normal | xavier | kaiming | orthogonal]
+  init_gain : 0.02 # scaling factor for normal, xavier and orthogonal.
+  dropout : False
+
+        # train hyperparams
+  lambda_A : 10.0
+  lambda_B : 10.0
+  lambda_identity : 0.5
+  start_epoch : 1
+  n_epochs : 100
+  n_epochs_decay : 100
+  beta1 : 0.5
+  lr : 0.0002
+  lr_policy : "linear"
+  gan_mode : "lsgan" # [vanilla| lsgan | wgangp]
+
+  # dataset related options
+  pool_size : 50
+  self.direction : "AtoB"
+  input_nc : 3
+  output_nc : 3
+  batch_size : 2
+  load_size : 286
+  crop_size : 256
+  preprocess : "resize_and_crop" # [resize_and_crop | crop | scale_width | scale_width_and_crop | none]
+  no_flip : False

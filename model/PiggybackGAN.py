@@ -3,7 +3,7 @@ Description:
 Author: Zhang yizhen
 Date: 2023-03-07 18:35:29
 LastEditors: Zhang yizhen
-LastEditTime: 2023-03-21 23:16:52
+LastEditTime: 2023-03-22 19:02:38
 FilePath: /Piggyback_GAN/model/PiggybackGAN.py
 
 Copyright (c) 2023 by yizhen_coder@outlook.com, All Rights Reserved. 
@@ -45,14 +45,12 @@ class PiggybackGAN(nn.Module):
         self.netG_B_filter_list = []
         self.netG_A_weights = []
         self.netG_B_weights = []
-        self.netG_A_bias = []
-        self.netG_B_bias = []
         self.netG_A = define_G(self.opt.input_nc, self.opt.output_nc, self.opt.ngf, self.opt.netG, self.opt.norm,
                                         self.opt.dropout, self.opt.init_type, self.opt.init_gain, self.task_num, self.netG_A_filter_list)
         self.netG_B = define_G(self.opt.input_nc, self.opt.output_nc, self.opt.ngf, self.opt.netG, self.opt.norm,
                                         self.opt.dropout, self.opt.init_type, self.opt.init_gain, self.task_num, self.netG_B_filter_list)
 
-        if opt.train:
+        if opt.is_train:
             self.netD_A = define_D(self.opt.input_nc, self.opt.ndf, self.opt.netD, self.opt.norm, self.opt.init_type, self.opt.init_gain)
             self.netD_B = define_D(self.opt.input_nc, self.opt.ndf, self.opt.netD, self.opt.norm, self.opt.init_type, self.opt.init_gain)
 
@@ -70,7 +68,8 @@ class PiggybackGAN(nn.Module):
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
             
-            self.schedulers = [networks.get_scheduler(optimizer, self.opt, self.task_num-1, self.opt.train.num_epochs[self.task_num-1]) for optimizer in self.optimizers]
+            self.scheduler_G = networks.get_scheduler(self.optimizer_G, self.opt, self.task_num-1, self.opt.train.num_epochs[self.task_num-1])
+            self.scheduler_D = networks.get_scheduler(self.optimizer_D, self.opt, self.task_num-1, self.opt.train.num_epochs[self.task_num-1])
  
 
 
@@ -87,9 +86,8 @@ class PiggybackGAN(nn.Module):
         
         """Update learning rates for all the networks; called at the end of every epoch"""
         old_lr = self.optimizers[0].param_groups[0]['lr']
-        for scheduler in self.schedulers:
-            scheduler.step()
-
+        self.scheduler_G.step()
+        self.scheduler_D.step()
         lr = self.optimizers[0].param_groups[0]['lr']
         print('learning rate %.7f -> %.7f' % (old_lr, lr))
 
@@ -97,14 +95,14 @@ class PiggybackGAN(nn.Module):
         # self.protect_filter()
         # self.save_model(model_name='target')
         
-        self._baseline = self._target
-        self._target = None
+        # self._baseline = self._target
+        # self._target = None
         self.task_num += 1
         
         self.netG_A = define_G(self.opt.input_nc, self.opt.output_nc, self.opt.ngf, self.opt.netG, self.opt.norm,
-                                        self.opt.dropout, self.opt.init_type, self.opt.init_gain, self.opt.task_num, self.netG_A_filter_list)
+                                        self.opt.dropout, self.opt.init_type, self.opt.init_gain, self.task_num, self.netG_A_filter_list)
         self.netG_B = define_G(self.opt.input_nc, self.opt.output_nc, self.opt.ngf, self.opt.netG, self.opt.norm,
-                                        self.opt.dropout, self.opt.init_type, self.opt.init_gain, self.opt.task_num, self.netG_B_filter_list)
+                                        self.opt.dropout, self.opt.init_type, self.opt.init_gain, self.task_num, self.netG_B_filter_list)
         self.netD_A = define_D(self.opt.input_nc, self.opt.ndf, self.opt.netD, self.opt.norm, self.opt.init_type, self.opt.init_gain)
         self.netD_B = define_D(self.opt.input_nc, self.opt.ndf, self.opt.netD, self.opt.norm, self.opt.init_type, self.opt.init_gain)
         self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A.parameters(), self.netG_B.parameters()), lr=self.opt.train.lr_init[self.task_num-1], betas=(0.9, 0.999))
@@ -115,7 +113,7 @@ class PiggybackGAN(nn.Module):
         self.optimizers.append(self.optimizer_D)
         self.schedulers = [networks.get_scheduler(optimizer, self.opt, self.task_num-1, self.opt.train.num_epochs[self.task_num-1]) for optimizer in self.optimizers]
    
-        self.now_task_id +=1
+        
 
 
     def set_input(self, input):
@@ -145,7 +143,7 @@ class PiggybackGAN(nn.Module):
         self.fake_A = self.netG_B(self.real_B)  # G_B(B)
         self.rec_B = self.netG_A(self.fake_A)   # G_A(G_B(B))
 
-    def backward_D_basic(self, netD, real, fake, retain_graph=True):
+    def backward_D_basic(self, netD, real, fake, retain_graph=False):
         """Calculate GAN loss for the discriminator
 
         Parameters:
@@ -188,7 +186,7 @@ class PiggybackGAN(nn.Module):
             self.idt_A = self.netG_A(self.real_B)
             self.loss_idt_A = self.criterionIdt(self.idt_A, self.real_B) * lambda_B * lambda_idt
             # G_B should be identity if real_A is fed: ||G_B(A) - A||
-            self.rdidt_B = self.netG_B(self.real_A)
+            self.idt_B = self.netG_B(self.real_A)
             self.loss_idt_B = self.criterionIdt(self.idt_B, self.real_A) * lambda_A * lambda_idt
         else:
             self.loss_idt_A = 0
@@ -204,7 +202,7 @@ class PiggybackGAN(nn.Module):
         self.loss_cycle_B = self.criterionCycle(self.rec_B, self.real_B) * lambda_B
         # combined loss and calculate gradients
         self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B
-        self.loss_G.backward(retain_graph=True)
+        self.loss_G.backward(retain_graph=False)
 
 
     def optimize_parameters(self):
@@ -255,7 +253,8 @@ class PiggybackGAN(nn.Module):
     def get_current_losses(self):
         loss_dict = OrderedDict()
         ################################
-        loss_dict['GAN_Loss'] = self.loss
+        loss_dict['GAN_Loss_G'] = self.loss_G
+        # loss_dict['GAN_Loss_D'] = self.loss_D
         ################################
         return loss_dict
         
@@ -307,12 +306,12 @@ class PiggybackGAN(nn.Module):
         load_dict = torch.load(load_path, map_location='cpu')
         
         self.best_epoch = load_dict['best_epoch']
-        self.netG_A = define_G(self.opt.input_nc, self.opt.output_nc, self.opt.ngf, self.opt.netG, self.opt.norm,
-                                        self.opt.dropout, self.opt.init_type, self.opt.init_gain, self.opt.task_num, self.netG_A_filter_list)
-        self.netG_B = define_G(self.opt.input_nc, self.opt.output_nc, self.opt.ngf, self.opt.netG, self.opt.norm,
-                                        self.opt.dropout, self.opt.init_type, self.opt.init_gain, self.opt.task_num, self.netG_B_filter_list)
-        self.netD_A = define_D(self.opt.input_nc, self.opt.ndf, self.opt.netD, self.opt.norm, self.opt.init_type, self.opt.init_gain)
-        self.netD_B = define_D(self.opt.input_nc, self.opt.ndf, self.opt.netD, self.opt.norm, self.opt.init_type, self.opt.init_gain)
+        # self.netG_A = define_G(self.opt.input_nc, self.opt.output_nc, self.opt.ngf, self.opt.netG, self.opt.norm,
+        #                                 self.opt.dropout, self.opt.init_type, self.opt.init_gain, self.opt.checkpoints.resume_task_id+1, self.netG_A_filter_list)
+        # self.netG_B = define_G(self.opt.input_nc, self.opt.output_nc, self.opt.ngf, self.opt.netG, self.opt.norm,
+        #                                 self.opt.dropout, self.opt.init_type, self.opt.init_gain, self.opt.checkpoints.resume_task_id+1, self.netG_B_filter_list)
+        # self.netD_A = define_D(self.opt.input_nc, self.opt.ndf, self.opt.netD, self.opt.norm, self.opt.init_type, self.opt.init_gain)
+        # self.netD_B = define_D(self.opt.input_nc, self.opt.ndf, self.opt.netD, self.opt.norm, self.opt.init_type, self.opt.init_gain)
         self.netG_A.load_state_dict(load_dict['netG_A'])
         self.netG_B.load_state_dict(load_dict['netG_B'])
         self.netD_A.load_state_dict(load_dict['netD_A'])
@@ -328,11 +327,12 @@ class PiggybackGAN(nn.Module):
         #     self._baseline = load_dict['baseline']
         # if 'target' in load_dict:
         #     self._target = load['target']
-        self.schedulers = load_dict['schedulers']
-        for scheduler in self.schedulers:
-            total_epoch = scheduler['last_epoch'] +scheduler['after_scheduler'].last_epoch
-            for _ in range(total_epoch):
-               scheduler.step()
+        total_epoch_G = load_dict['scheduler_G']['last_epoch'] + load_dict['scheduler_G']['after_scheduler'].last_epoch
+        for _ in range(total_epoch_G):
+            self.scheduler_G.step()
+        total_epoch_D = load_dict['scheduler_D']['last_epoch'] + load_dict['scheduler_D']['after_scheduler'].last_epoch
+        for _ in range(total_epoch_D):
+            self.scheduler_D.step()
       
 
     def _save_model(self, mode='epoch', task_id=0, epoch=None):
@@ -349,7 +349,7 @@ class PiggybackGAN(nn.Module):
         save_path = os.path.join(self.opt.checkpoints.save_model_dir, folder)
 
         save_dict = {}
-        if isinstance(self.restore_net, nn.DataParallel):
+        if isinstance(self.netD_A, nn.DataParallel):
             model_dict_netD_A = self.netD_A.module.state_dict()
             model_dict_netD_B = self.netD_B.module.state_dict()
             model_dict_netG_A = self.netG_A.module.state_dict()
@@ -361,7 +361,7 @@ class PiggybackGAN(nn.Module):
             model_dict_netG_B = self.netG_B.state_dict()
             
         
-        save_dict['scheduler'] = self.scheduler.state_dict()
+        # save_dict['schedulers'] = self.schedulers.state_dict()
         save_dict['task_num'] = self.task_num
         save_dict['netD_A'] = model_dict_netD_A
         save_dict['netD_B'] = model_dict_netD_B
@@ -369,7 +369,8 @@ class PiggybackGAN(nn.Module):
         save_dict['netG_B'] = model_dict_netG_B
         save_dict['fake_A_pool'] = self.fake_A_pool
         save_dict['fake_B_pool'] = self.fake_B_pool
-        save_dict['schedulers'] = self.schedulers
+        save_dict['scheduler_D'] = self.scheduler_D.state_dict()
+        save_dict['scheduler_G'] = self.scheduler_G.state_dict()
         ################################################################
         save_dict['best_epoch'] = self.best_epoch
         ################################################################
@@ -381,26 +382,26 @@ class PiggybackGAN(nn.Module):
 
     def save_model(self, model_name=None, mode='epoch', task_id=0, epoch=None):
         os.makedirs(self.opt.checkpoints.save_model_dir, exist_ok=True)
-        # if model_name == 'baseline':
-        #     torch.save(self.restore_net.state_dict(), os.path.join(self.opt.checkpoints.save_model_dir, "baseline.pth"))
-        #     if isinstance(self.restore_net, nn.DataParallel):
-        #         baseline_state_dict = self.restore_net.module.state_dict()
-        #     else:
-        #         baseline_state_dict = self.restore_net.state_dict()
-        #     for k,v in baseline_state_dict.items():
-        #         baseline_state_dict[k] = v.cpu()
-        #     self._baseline = baseline_state_dict
-        # elif model_name == 'target':
-        #     torch.save(self.restore_net.state_dict(), os.path.join(self.opt.checkpoints.save_model_dir, "target.pth"))
-        #     if isinstance(self.restore_net, nn.DataParallel):
-        #         target_state_dict = self.restore_net.module.state_dict()
-        #     else:
-        #         target_state_dict = self.restore_net.state_dict()
-        #     for k,v in target_state_dict.items():
-        #         target_state_dict[k] = v.cpu()
-        #     self._target = target_state_dict
-        # else:
-        self._save_model(mode=mode, task_id=task_id, epoch=epoch)
+        if model_name == 'baseline':
+            torch.save(self.restore_net.state_dict(), os.path.join(self.opt.checkpoints.save_model_dir, "baseline.pth"))
+            if isinstance(self.restore_net, nn.DataParallel):
+                baseline_state_dict = self.restore_net.module.state_dict()
+            else:
+                baseline_state_dict = self.restore_net.state_dict()
+            for k,v in baseline_state_dict.items():
+                baseline_state_dict[k] = v.cpu()
+            self._baseline = baseline_state_dict
+        elif model_name == 'target':
+            torch.save(self.restore_net.state_dict(), os.path.join(self.opt.checkpoints.save_model_dir, "target.pth"))
+            if isinstance(self.restore_net, nn.DataParallel):
+                target_state_dict = self.restore_net.module.state_dict()
+            else:
+                target_state_dict = self.restore_net.state_dict()
+            for k,v in target_state_dict.items():
+                target_state_dict[k] = v.cpu()
+            self._target = target_state_dict
+        else:
+            self._save_model(mode=mode, task_id=task_id, epoch=epoch)
 
 
     # def select_filter(self, imgs):

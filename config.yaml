@@ -42,7 +42,7 @@ train:
   # num_epoch_baseline: 20
   batch_size: [8,8,8,8]
 
-  val_interval: 100
+  val_interval: 10
   lr_init:   
     - !!float 2e-4
     - !!float 2e-4
@@ -57,10 +57,7 @@ train:
 
 
   lr_policy: 'cosine'
-  ##
-  # ewclamda1: !!float 5e9
-  # ewclamda2: !!float 1e11
-  ##
+
 
 checkpoints:
   save_image: True
@@ -69,16 +66,13 @@ checkpoints:
   save_model_dir: './checkpoints'
   resume: false
   resume_mode: 'epoch'
-  resume_epoch: 160
-  resume_task_id: 2
+  resume_epoch: 1
+  resume_task_id: 0
 
 
 faig:
   total_step: 200
   rate: 0.0005
 
-cyclegan:
-  nodes: 1
-  gpu_ids: [0,1,2,3]
-  nr : 0 # ranking within nodes
+
 

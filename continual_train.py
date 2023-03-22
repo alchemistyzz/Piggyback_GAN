@@ -3,7 +3,7 @@ Description:
 Author: Zhang yizhen
 Date: 2023-03-07 18:35:29
 LastEditors: Zhang yizhen
-LastEditTime: 2023-03-21 23:30:48
+LastEditTime: 2023-03-22 16:44:54
 FilePath: /Piggyback_GAN/continual_train.py
 
 Copyright (c) 2023 by yizhen_coder@outlook.com, All Rights Reserved. 
@@ -25,6 +25,8 @@ import numpy as np
 from dataset import ImageRestorationDataset
 import utils 
 from torchsummary import summary
+import warnings
+warnings.filterwarnings("ignore")
 
 def get_train_val_dataset(opt, task_name, task_id, is_baseline=False):
     dataset_path = os.path.join(opt.dataset_path, task_name)
@@ -80,12 +82,12 @@ def train_per_task(opt, task_dataset, model, task_id, visualizer, start_epoch=1)
 
         if start_epoch != 1:
             print(f'{"-"*78}')
-            print(f'==> Resuming training for Task {task_id} from epoch {start_epoch} with learning rate: {model.optimizer.param_groups[0]["lr"]}')
+            print(f'==> Resuming training for Task {task_id} from epoch {start_epoch} with learning rate: {model.optimizers[0].param_groups[0]["lr"]}')
             print(f'{"-"*78}')
 
         train_dataloader = task_dataset[task_id]['train']
         best_epoch, best_psnr = opt.train.num_epochs[task_id], 0.
-        
+        model.best_epoch = best_epoch
         # utils.fix_random_seed()
 
         epoch_loss = OrderedDict()
@@ -108,27 +110,24 @@ def train_per_task(opt, task_dataset, model, task_id, visualizer, start_epoch=1)
                 epoch_loss[key] /= len(train_dataloader)
 
             print(f"{'='*78}\nTraining for task {task_id}\n")
-            print(f"Epoch: {epoch}\tLearningRate {model.optimizer.param_groups[0]['lr']:.8f}")
+            print(f"Epoch: {epoch}\tLearningRate {model.optimizer_G.param_groups[0]['lr']:.8f}")
             for key, value in epoch_loss.items():
                 print(f"\t{key}: {value:.4f}")
             print(f'\n{"="*78}\n')
 
             model.update_learning_rate()
-            # print("model.named_parameters()")
-            # for n, p in model.restore_net.named_parameters():  
-            #     if p.requires_grad:   
-            #             print(n)
-            #             print(p)
-
+    
             if epoch % opt.train.val_interval == 0:
                 tag = '{}_image_task'+str(task_id)
                 visualizer.visualize_images(epoch=epoch,
                     **{
-                        tag.format('degraded'):model.degraded_image,
-                        tag.format('clean'):model.clean_image,
-                        tag.format('restored'):model.restored_image
+                        tag.format('degraded'):model.real_A,
+                        tag.format('clean'):model.real_B,
+                        tag.format('restored'):model.fake_B
                     }
                 )
+                model.save_model(mode='epoch', task_id=task_id, epoch=epoch)
+ 
                 # best_epoch, best_psnr = evaluate_tasks_till_now(opt, task_dataset, model, task_id, epoch, best_epoch, best_psnr, visualizer)
 
         conv_dx = 0
@@ -139,15 +138,12 @@ def train_per_task(opt, task_dataset, model, task_id, visualizer, start_epoch=1)
 
                         if model.task_num == 1:
                             model.netG_A_filter_list.append([module.unc_filt.detach().cuda()])
-                            model.netG_A_bias.append([module.bias.detach().cuda()])
                         elif model.task_num == 2:
                             model.netG_A_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
-                            model.netG_A_bias[conv_dx].append(module.bias.detach().cuda())
                             model.netG_A_weights.append([module.weights_mat.detach().cuda()])
                             conv_dx += 1
                         else:
                             model.netG_A_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
-                            model.netG_A_bias[conv_dx].append(module.bias.detach().cuda())
                             model.netG_A_weights[conv_dx].append(module.weights_mat.detach().cuda())
                             conv_dx += 1
         conv_dx = 0
@@ -158,26 +154,20 @@ def train_per_task(opt, task_dataset, model, task_id, visualizer, start_epoch=1)
 
                         if model.task_num == 1:
                             model.netG_B_filter_list.append([module.unc_filt.detach().cuda()])
-                            model.netG_B_bias.append([module.bias.detach().cuda()])
                         elif model.task_num == 2:
                             model.netG_B_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
-                            model.netG_B_bias[conv_dx].append(module.bias.detach().cuda())
                             model.netG_B_weights.append([module.weights_mat.detach().cuda()])
                             conv_dx += 1
                         else:
                             model.netG_B_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
-                            model.netG_B_bias[conv_dx].append(module.bias.detach().cuda())
                             model.netG_B_weights[conv_dx].append(module.weights_mat.detach().cuda())
                             conv_dx += 1
 
-        model.best_epoch = best_epoch
+        
         model.save_model(mode='latest')   
 
-        model.save_model(model_name='target')
-        # if (task_id<len(opt.task_sequence)):
-        #     model.update_task()
-        #     model.set_device('gpu')
-        
+            
+     
         
 
 # def evaluate_tasks_till_now(opt, task_dataset, model, now_task_id, epoch, best_epoch, best_psnr, visualizer):
@@ -256,12 +246,13 @@ def test_tasks_till_now(opt, task_dataset, model, now_task_id, visualizer):
     
     for task_id in range(now_task_id+1):
         model.netG_A = define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.norm,
-                                        opt.dropout, opt.init_type, opt.init_gain, opt.task_num, model.netG_A_filter_list)
-        model.netG_B = define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.norm,
-                                        opt.dropout, opt.init_type, opt.init_gain, opt.task_num, model.netG_B_filter_list)
-        model.netG_A = load_pb_conv(model.netG_A,model.netG_A_filter_list,model.netG_A_weights,model.netG_A_bias,task_id)
-        model.netG_B = load_pb_conv(model.netG_B,model.netG_B_filter_list,model.netG_B_weights,model.netG_B_bias,task_id)
-        count1,count2 = count_parameters(model)
+                                        opt.dropout, opt.init_type, opt.init_gain, task_num=task_id+1, filter_list = model.netG_A_filter_list)
+        # model.netG_B = define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.norm,
+        #                                 opt.dropout, opt.init_type, opt.init_gain, task_id, model.netG_B_filter_list)
+        model.netG_A = load_pb_conv(model.netG_A,model.netG_A_filter_list,model.netG_A_weights,task_id)
+        # model.netG_B = load_pb_conv(model.netG_B,model.netG_B_filter_list,model.netG_B_weights,model.netG_B_bias,task_id)
+        model.set_device('gpu')
+        count1,count2 = count_parameters(model.netG_A)
         print(f'The model has {count1} trainable parameters and {count2} parameters including the buffers ')
         test_dataloader = task_dataset[task_id]['test']
         total_psnr, total_ssim = 0., 0.
@@ -312,16 +303,17 @@ def train_and_evaluate(opt):
     if opt.checkpoints.resume:
         model.load_model(mode=opt.checkpoints.resume_mode, task_id=opt.checkpoints.resume_task_id, epoch=opt.checkpoints.resume_epoch)
         start_task_id = model.task_num - 1
-        start_epoch = model.scheduler.last_epoch + model.scheduler.after_scheduler.last_epoch + 1
+        start_epoch = model.scheduler_G.last_epoch + model.scheduler_G.after_scheduler.last_epoch + 1
 
     if torch.cuda.device_count()>=1:
         print(f"Using {torch.cuda.device_count()} GPUs!\n")
         model.set_device('gpu')
         model.cuda()
-    summary(model.netG_A, input_size=(3, 256, 256), batch_size=8)
-    summary(model.netG_B, input_size=(3, 256, 256), batch_size=8)
-    summary(model.netD_A, input_size=(3, 256, 256), batch_size=8)
-    summary(model.netD_B, input_size=(3, 256, 256), batch_size=8)
+    # print(model.netG_A)
+    # summary(model.netG_A, input_size=(3, 256, 256), batch_size=8)
+    # summary(model.netG_B, input_size=(3, 256, 256), batch_size=8)
+    # summary(model.netD_A, input_size=(3, 256, 256), batch_size=8)
+    # summary(model.netD_B, input_size=(3, 256, 256), batch_size=8)
     # for module in model.restore_net.modules:
     #     print(module)
 

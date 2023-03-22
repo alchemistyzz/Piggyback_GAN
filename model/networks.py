@@ -3,7 +3,7 @@ Description:
 Author: Zhang yizhen
 Date: 2023-03-07 18:35:29
 LastEditors: Zhang yizhen
-LastEditTime: 2023-03-21 23:02:28
+LastEditTime: 2023-03-22 17:01:33
 FilePath: /Piggyback_GAN/model/networks.py
 
 Copyright (c) 2023 by yizhen_coder@outlook.com, All Rights Reserved. 
@@ -131,25 +131,39 @@ def init_weights(net, init_type='normal', init_gain=0.02):
             init.constant_(m.bias.data, 0.0)
     print('initialize network with %s' % init_type)
     net.apply(init_func)  # apply the initialization function <init_func>
+def init_net(net, init_type='normal', init_gain=0.02, gpu_ids=[]):
+    """Initialize a network: 1. register CPU/GPU device (with multi-GPU support); 2. initialize the network weights
+    Parameters:
+        net (network)      -- the network to be initialized
+        init_type (str)    -- the name of an initialization method: normal | xavier | kaiming | orthogonal
+        gain (float)       -- scaling factor for normal, xavier and orthogonal.
+        gpu_ids (int list) -- which GPUs the network runs on: e.g., 0,1,2
 
-def load_pb_conv(network, unc_filt, weight_mat,bias, task_id):
+    Return an initialized network.
+    """
+    if len(gpu_ids) > 0:
+        assert(torch.cuda.is_available())
+        net.to(gpu_ids[0])
+        net = torch.nn.DataParallel(net, gpu_ids)  # multi-GPUs
+    init_weights(net, init_type, init_gain=init_gain)
+    return net
+
+
+def load_pb_conv(network, unc_filt, weight_mat, task_id):
     conv_idx = 0
     cnt=0
     for name, module in network.named_modules():
         if isinstance(module, PiggybackConv):
             module.unc_filt = nn.Parameter(unc_filt[conv_idx][task_id])
-            if len(bias) > 0:
-                module.bias = nn.Parameter(bias[conv_idx][task_id])
+           
             if task_id > 0:
                 module.weights_mat = nn.Parameter(weight_mat[conv_idx][task_id - 1])
                 module.concat_unc_filter = torch.cat(unc_filt[conv_idx][0:task_id], dim=0)
             conv_idx += 1
         elif isinstance(module, PiggybackTransposeConv):
             module.unc_filt = nn.Parameter(unc_filt[conv_idx][task_id])
-            if len(bias) > 0:
-                module.bias = nn.Parameter(bias[conv_idx][task_id])
             if task_id > 0:
-                module.weights_mat = nn.Parameter(unc_filt[conv_idx][task_id])
+                module.weights_mat = nn.Parameter(weight_mat[conv_idx][task_id-1])
                 module.concat_unc_filter = torch.cat(unc_filt[conv_idx][0:task_id], dim=1)
             conv_idx += 1
 
@@ -214,19 +228,20 @@ def define_G(input_nc, output_nc, ngf, netG, norm='instance', use_dropout=False,
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
 
-    task_id = task_num - 1 
-    net = replace_conv(net, task_id, filter_list)
-        # all_layers_netG = nn.ModuleList()
-        # all_layers_netG = remove_sequential(net, all_layers_netG)
-        # copy_all_layers_netG = copy.deepcopy(all_layers_netG)
-        # replaced_netG = replace_conv(copy_all_layers_netG, task_id, filter_list)
-        # del net
-        # net = nn.Sequential(*replaced_netG)
-        # del replaced_netG
-        # del copy_all_layers_netG
-        # del all_layers_netG
+    # task_id = task_num - 1 
+    # net = replace_conv(net, task_id, filter_list)
+    all_layers_netG = nn.ModuleList()
+    all_layers_netG = remove_sequential(net, all_layers_netG)
+    copy_all_layers_netG = copy.deepcopy(all_layers_netG)
+    replaced_netG = replace_conv(copy_all_layers_netG, task_num, filter_list)
+    del net
+    net = nn.Sequential(*replaced_netG)
+    del replaced_netG
+    del copy_all_layers_netG
+    del all_layers_netG
 
     # if len(opt.gpu) > 0:
+    init_weights(net, init_type, init_gain=init_gain)
     net = nn.DataParallel(net)
 
     return net
@@ -289,80 +304,51 @@ def remove_sequential(network, layer_list):
 
     return layer_list
 
-def replace_conv(network, task_id=0, filter_list=None, piggylamdas=0.25):#layer_list, task_id=0, filter_list=None):
+def replace_conv(layer_list, task_idx=1, filter_list=None):
+
     conv_idx = 0
 
-    for name, module in network.named_modules():
-        if isinstance(module, nn.Conv2d) or isinstance(module, PiggybackConv):
-            net = network
-            for idx in name.split('.')[:-1]:
-                net = getattr(net, idx)
-            if task_id == 0:
+    for layer_idx in range(len(layer_list)):
+
+        if isinstance(layer_list[layer_idx], nn.Conv2d) or isinstance(layer_list[layer_idx], PiggybackConv):
+            el = layer_list[layer_idx]
+            del layer_list[layer_idx]
+
+            if task_idx == 1:
                 unc_filter_list = None
             else:
                 unc_filter_list = filter_list[conv_idx]
                 conv_idx += 1
-            replace_module = PiggybackConv(in_channels=module.in_channels, out_channels=module.out_channels, kernel_size=module.kernel_size, stride=module.stride, padding=module.padding,lambdas=piggylamdas,task=task_id+1, unc_filt_list=unc_filter_list)
-            setattr(net, name.split('.')[-1], replace_module)
+
+            conv_layer = PiggybackConv(in_channels=el.in_channels, out_channels=el.out_channels, kernel_size=el.kernel_size, stride=el.stride, padding=el.padding, task=task_idx, unc_filt_list=unc_filter_list)
+            # conv_layer = nn.Conv2d(in_channels=el.in_channels, out_channels=el.out_channels, kernel_size=el.kernel_size, stride=el.stride, padding=el.padding)
+            layer_list.insert(layer_idx, conv_layer)
+
+            del el
+            del conv_layer
+
             continue
-    
-        if isinstance(module, nn.ConvTranspose2d) or isinstance(module, PiggybackTransposeConv):
-            net = network
-            for idx in name.split('.')[:-1]:
-                net = getattr(net, idx)
-            if task_id == 0:
+
+        if isinstance(layer_list[layer_idx], nn.ConvTranspose2d) or isinstance(layer_list[layer_idx], PiggybackTransposeConv):
+            el = layer_list[layer_idx]
+            del layer_list[layer_idx]
+
+            if task_idx == 1:
                 unc_filter_list = None
             else:
                 unc_filter_list = filter_list[conv_idx]
-                conv_idx += 1 
-            replace_module = PiggybackTransposeConv(in_channels=module.in_channels, out_channels=module.out_channels, kernel_size=module.kernel_size, stride=module.stride, padding=module.padding,lambdas=piggylamdas, task=task_id+1, unc_filt_list=unc_filter_list)
-            setattr(net, name.split('.')[-1], replace_module)
+                conv_idx += 1
+
+            conv_layer = PiggybackTransposeConv(in_channels=el.in_channels, out_channels=el.out_channels, kernel_size=el.kernel_size, stride=el.stride, padding=el.padding, output_padding=el.output_padding, task=task_idx, unc_filt_list=unc_filter_list)
+            # conv_layer = nn.ConvTranspose2d(in_channels=el.in_channels, out_channels=el.out_channels, kernel_size=el.kernel_size, stride=el.stride, padding=el.padding, output_padding=el.output_padding)
+            layer_list.insert(layer_idx, conv_layer)
+
+            del el
+            del conv_layer
+
             continue
-    #################################
-    # conv_idx = 0
 
-    # for layer_idx in range(len(filter_list)):
-
-    #     if isinstance(filter_list[layer_idx], nn.Conv2d) or isinstance(filter_list[layer_idx], PiggybackConv):
-    #         el = filter_list[layer_idx]
-    #         del filter_list[layer_idx]
-
-    #         if task_id == 0:
-    #             unc_filter_list = None
-    #         else:
-    #             unc_filter_list = filter_list[conv_idx]
-    #             conv_idx += 1
-
-    #         conv_layer = PiggybackConv(in_channels=el.in_channels, out_channels=el.out_channels, kernel_size=el.kernel_size, stride=el.stride, padding=el.padding, task=task_id+1, unc_filt_list=unc_filter_list)
-    #         # conv_layer = nn.Conv2d(in_channels=el.in_channels, out_channels=el.out_channels, kernel_size=el.kernel_size, stride=el.stride, padding=el.padding)
-    #         filter_list.insert(layer_idx, conv_layer)
-
-    #         del el
-    #         del conv_layer
-
-    #         continue
-
-    #     if isinstance(filter_list[layer_idx], nn.ConvTranspose2d) or isinstance(filter_list[layer_idx], PiggybackTransposeConv):
-    #         el = filter_list[layer_idx]
-    #         del filter_list[layer_idx]
-
-    #         if task_id == 0:
-    #             unc_filter_list = None
-    #         else:
-    #             unc_filter_list = filter_list[conv_idx]
-    #             conv_idx += 1
-
-    #         conv_layer = PiggybackTransposeConv(in_channels=el.in_channels, out_channels=el.out_channels, kernel_size=el.kernel_size, stride=el.stride, padding=el.padding, output_padding=el.output_padding, task=task_id+1, unc_filt_list=unc_filter_list)
-    #         # conv_layer = nn.ConvTranspose2d(in_channels=el.in_channels, out_channels=el.out_channels, kernel_size=el.kernel_size, stride=el.stride, padding=el.padding, output_padding=el.output_padding)
-    #         filter_list.insert(layer_idx, conv_layer)
-
-    #         del el
-    #         del conv_layer
-
-    #         continue
-    ##################################
-
-    return network
+    return layer_list
 # %%
 class Identity(nn.Module):
     def forward(self, x):

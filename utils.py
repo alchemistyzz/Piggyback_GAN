@@ -3,8 +3,8 @@ Description:
 Author: Zhang yizhen
 Date: 2023-03-07 18:35:30
 LastEditors: Zhang yizhen
-LastEditTime: 2023-03-21 15:37:35
-FilePath: /zyz/Piggyback_GAN/utils.py
+LastEditTime: 2023-03-22 17:35:44
+FilePath: /Piggyback_GAN/utils.py
 
 Copyright (c) 2023 by yizhen_coder@outlook.com, All Rights Reserved. 
 '''
@@ -47,7 +47,7 @@ class Visualizer():
         if not self.save_img:
             return
         image_types = ['degraded', 'clean', 'restored']
-        for type_, images in zip(image_types, [self.model.degraded_image, self.model.clean_image, self.model.restored_image]):
+        for type_, images in zip(image_types, [self.model.real_A, self.model.real_B, self.model.fake_B]):
             for image, file_name in zip(images, self.model.file_name):
                 image = TF.to_pil_image(image.cpu().detach())
                 save_path = os.path.join(folder, type_)
@@ -77,7 +77,7 @@ class ImageBuffer():
                 p = random.uniform(0, 1)
                 if p > 0.5:  # by 50% chance, the buffer will return a previously stored image, and insert the current image into the buffer
                     random_id = random.randint(0, self.pool_size - 1)  # randint is inclusive
-                    tmp = self.images[random_id].clone()
+                    tmp = self.images[random_id].clone().cuda()
                     self.images[random_id] = image
                     return_images.append(tmp)
                 else:       # by another 50% chance, the buffer will return the current image

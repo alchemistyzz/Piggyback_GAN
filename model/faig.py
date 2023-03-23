@@ -1,13 +1,3 @@
-'''
-Description: 
-Author: Zhang yizhen
-Date: 2023-03-07 18:35:29
-LastEditors: Zhang yizhen
-LastEditTime: 2023-03-21 15:26:54
-FilePath: /zyz/Piggyback_GAN/model/faig.py
-
-Copyright (c) 2023 by yizhen_coder@outlook.com, All Rights Reserved. 
-'''
 import cv2
 import glob
 import numpy as np

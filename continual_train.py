@@ -3,8 +3,8 @@ Description:
 Author: Zhang yizhen
 Date: 2023-03-07 18:35:29
 LastEditors: Zhang yizhen
-LastEditTime: 2023-03-22 16:44:54
-FilePath: /Piggyback_GAN/continual_train.py
+LastEditTime: 2023-03-23 16:56:54
+FilePath: /zyz/piggyback_1/continual_train.py
 
 Copyright (c) 2023 by yizhen_coder@outlook.com, All Rights Reserved. 
 '''
@@ -82,7 +82,7 @@ def train_per_task(opt, task_dataset, model, task_id, visualizer, start_epoch=1)
 
         if start_epoch != 1:
             print(f'{"-"*78}')
-            print(f'==> Resuming training for Task {task_id} from epoch {start_epoch} with learning rate: {model.optimizers[0].param_groups[0]["lr"]}')
+            print(f'==> Resuming training for Task {task_id} from epoch {start_epoch} with learning rate: {model.optimizer.param_groups[0]["lr"]}')
             print(f'{"-"*78}')
 
         train_dataloader = task_dataset[task_id]['train']
@@ -110,7 +110,7 @@ def train_per_task(opt, task_dataset, model, task_id, visualizer, start_epoch=1)
                 epoch_loss[key] /= len(train_dataloader)
 
             print(f"{'='*78}\nTraining for task {task_id}\n")
-            print(f"Epoch: {epoch}\tLearningRate {model.optimizer_G.param_groups[0]['lr']:.8f}")
+            print(f"Epoch: {epoch}\tLearningRate {model.optimizer.param_groups[0]['lr']:.8f}")
             for key, value in epoch_loss.items():
                 print(f"\t{key}: {value:.4f}")
             print(f'\n{"="*78}\n')
@@ -121,9 +121,9 @@ def train_per_task(opt, task_dataset, model, task_id, visualizer, start_epoch=1)
                 tag = '{}_image_task'+str(task_id)
                 visualizer.visualize_images(epoch=epoch,
                     **{
-                        tag.format('degraded'):model.real_A,
-                        tag.format('clean'):model.real_B,
-                        tag.format('restored'):model.fake_B
+                        tag.format('degraded'):model.degraded_image,
+                        tag.format('clean'):model.clean_image,
+                        tag.format('restored'):model.restored_image
                     }
                 )
                 model.save_model(mode='epoch', task_id=task_id, epoch=epoch)
@@ -131,37 +131,37 @@ def train_per_task(opt, task_dataset, model, task_id, visualizer, start_epoch=1)
                 # best_epoch, best_psnr = evaluate_tasks_till_now(opt, task_dataset, model, task_id, epoch, best_epoch, best_psnr, visualizer)
 
         conv_dx = 0
-        for name, module in model.netG_A.module.named_modules():
+        for name, module in model.restore_net.module.named_modules():
                 if isinstance(module, PiggybackConv) or isinstance(module, PiggybackTransposeConv):
                         module.unc_filt.requires_grad = False
                         module.bias.requires_grad = False
 
                         if model.task_num == 1:
-                            model.netG_A_filter_list.append([module.unc_filt.detach().cuda()])
+                            model.net_filter_list.append([module.unc_filt.detach().cuda()])
                         elif model.task_num == 2:
-                            model.netG_A_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
-                            model.netG_A_weights.append([module.weights_mat.detach().cuda()])
+                            model.net_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
+                            model.weights.append([module.weights_mat.detach().cuda()])
                             conv_dx += 1
                         else:
-                            model.netG_A_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
-                            model.netG_A_weights[conv_dx].append(module.weights_mat.detach().cuda())
+                            model.net_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
+                            model.weights[conv_dx].append(module.weights_mat.detach().cuda())
                             conv_dx += 1
-        conv_dx = 0
-        for name, module in model.netG_B.module.named_modules():
-                if isinstance(module, PiggybackConv) or isinstance(module, PiggybackTransposeConv):
-                        module.unc_filt.requires_grad = False
-                        module.bias.requires_grad = False
+        # conv_dx = 0
+        # for name, module in model.netG_B.module.named_modules():
+        #         if isinstance(module, PiggybackConv) or isinstance(module, PiggybackTransposeConv):
+        #                 module.unc_filt.requires_grad = False
+        #                 module.bias.requires_grad = False
 
-                        if model.task_num == 1:
-                            model.netG_B_filter_list.append([module.unc_filt.detach().cuda()])
-                        elif model.task_num == 2:
-                            model.netG_B_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
-                            model.netG_B_weights.append([module.weights_mat.detach().cuda()])
-                            conv_dx += 1
-                        else:
-                            model.netG_B_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
-                            model.netG_B_weights[conv_dx].append(module.weights_mat.detach().cuda())
-                            conv_dx += 1
+        #                 if model.task_num == 1:
+        #                     model.netG_B_filter_list.append([module.unc_filt.detach().cuda()])
+        #                 elif model.task_num == 2:
+        #                     model.netG_B_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
+        #                     model.netG_B_weights.append([module.weights_mat.detach().cuda()])
+        #                     conv_dx += 1
+        #                 else:
+        #                     model.netG_B_filter_list[conv_dx].append(module.unc_filt.detach().cuda())
+        #                     model.netG_B_weights[conv_dx].append(module.weights_mat.detach().cuda())
+        #                     conv_dx += 1
 
         
         model.save_model(mode='latest')   
@@ -231,28 +231,32 @@ def train_per_task(opt, task_dataset, model, task_id, visualizer, start_epoch=1)
 def test_tasks_till_now(opt, task_dataset, model, now_task_id, visualizer):
     ##load_best_epoch
     # print("model.best_epoch",model.best_epoch)
-    folder=f'task_{now_task_id}_epoch_{model.best_epoch}_model'
+    folder=f'task_{now_task_id}_epoch_{opt.train.num_epochs[now_task_id]}_model'
     # folder = 'model_latest' 
     # folder=f'task_{now_task_id}_model_best'
     # print(f'task_{now_task_id}_model_best')
     load_path = os.path.join(opt.checkpoints.save_model_dir, folder)
     assert os.path.exists(load_path), 'Load file not exists!'
     load_dict = torch.load(load_path, map_location='cpu')
-    # model.restore_net.module.load_state_dict(load_dict['model'])
+
+    count1,count2 = count_parameters(model.restore_net)
+    print(f'The model has {count1} trainable parameters and {count2} parameters including the buffers ')
+    
+    model.restore_net.module.load_state_dict(load_dict['model'])
     model.eval()
 
     print(f'{"="*78}\nTesting with task{now_task_id} with the best epoch{model.best_epoch}:\n')
     print("loading_pb_conv...")
     
     for task_id in range(now_task_id+1):
-        model.netG_A = define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.norm,
-                                        opt.dropout, opt.init_type, opt.init_gain, task_num=task_id+1, filter_list = model.netG_A_filter_list)
+        model.restore_net = define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.norm,
+                                        opt.dropout, opt.init_type, opt.init_gain, task_num=task_id+1, filter_list = model.net_filter_list)
         # model.netG_B = define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.norm,
         #                                 opt.dropout, opt.init_type, opt.init_gain, task_id, model.netG_B_filter_list)
-        model.netG_A = load_pb_conv(model.netG_A,model.netG_A_filter_list,model.netG_A_weights,task_id)
+        model.restore_net = load_pb_conv(model.restore_net,model.net_filter_list,model.weights,task_id)
         # model.netG_B = load_pb_conv(model.netG_B,model.netG_B_filter_list,model.netG_B_weights,model.netG_B_bias,task_id)
         model.set_device('gpu')
-        count1,count2 = count_parameters(model.netG_A)
+        count1,count2 = count_parameters(model.restore_net)
         print(f'The model has {count1} trainable parameters and {count2} parameters including the buffers ')
         test_dataloader = task_dataset[task_id]['test']
         total_psnr, total_ssim = 0., 0.
@@ -303,14 +307,14 @@ def train_and_evaluate(opt):
     if opt.checkpoints.resume:
         model.load_model(mode=opt.checkpoints.resume_mode, task_id=opt.checkpoints.resume_task_id, epoch=opt.checkpoints.resume_epoch)
         start_task_id = model.task_num - 1
-        start_epoch = model.scheduler_G.last_epoch + model.scheduler_G.after_scheduler.last_epoch + 1
+        start_epoch = model.scheduler.last_epoch + model.scheduler.after_scheduler.last_epoch + 1
 
     if torch.cuda.device_count()>=1:
         print(f"Using {torch.cuda.device_count()} GPUs!\n")
         model.set_device('gpu')
         model.cuda()
-    # print(model.netG_A)
-    # summary(model.netG_A, input_size=(3, 256, 256), batch_size=8)
+    # print(model.restore_net)
+    # summary(model.restore_net, input_size=(3, 256, 256), batch_size=8)
     # summary(model.netG_B, input_size=(3, 256, 256), batch_size=8)
     # summary(model.netD_A, input_size=(3, 256, 256), batch_size=8)
     # summary(model.netD_B, input_size=(3, 256, 256), batch_size=8)

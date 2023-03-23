@@ -1,14 +1,3 @@
-'''
-Description: 
-Author: Zhang yizhen
-Date: 2023-03-07 18:35:29
-LastEditors: Zhang yizhen
-LastEditTime: 2023-03-21 15:26:41
-FilePath: /zyz/Piggyback_GAN/main.py
-
-Copyright (c) 2023 by yizhen_coder@outlook.com, All Rights Reserved. 
-'''
-
 import os
 from munch import Munch
 import continual_train

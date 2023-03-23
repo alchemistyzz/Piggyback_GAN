@@ -1,14 +1,3 @@
-'''
-Description: 
-Author: Zhang yizhen
-Date: 2023-03-07 18:35:29
-LastEditors: Zhang yizhen
-LastEditTime: 2023-03-21 15:23:19
-FilePath: /zyz/Piggyback_GAN/dataset.py
-
-Copyright (c) 2023 by yizhen_coder@outlook.com, All Rights Reserved. 
-'''
-
 import os, random
 import numpy as np
 import torch

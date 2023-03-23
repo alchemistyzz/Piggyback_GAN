@@ -3,8 +3,8 @@ Description:
 Author: Zhang yizhen
 Date: 2023-03-07 18:35:29
 LastEditors: Zhang yizhen
-LastEditTime: 2023-03-22 17:01:33
-FilePath: /Piggyback_GAN/model/networks.py
+LastEditTime: 2023-03-23 10:28:32
+FilePath: /zyz/piggyback_1/model/networks.py
 
 Copyright (c) 2023 by yizhen_coder@outlook.com, All Rights Reserved. 
 '''
